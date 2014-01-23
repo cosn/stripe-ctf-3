@@ -1,0 +1,7 @@
+#!/bin/bash
+
+rm -rf current-round
+git clone lvl1-jg9onyab@stripe-ctf.com:current-round
+cp run miners* current-round
+cd current-round
+./run
