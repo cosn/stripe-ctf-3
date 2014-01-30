@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -x
+#exec ./ics -memprofile=ics.mprof -cpuprofile=ics.cprof $@
+exec ./ics -memprofile=ics.mprof $@
+#exec ./ics $@
