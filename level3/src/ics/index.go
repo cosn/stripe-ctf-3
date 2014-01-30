@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/cosn/collections/trie"
 	"io"
 	"log"
 	"os"
@@ -14,9 +13,9 @@ import (
 )
 
 type Index struct {
-	words map[string]bool
+	words map[string]int
 	files map[int]string
-	idx   *trie.T
+	idx   map[int]map[string]bool
 	id    int
 	path  string
 }
@@ -29,10 +28,9 @@ const minLength = 3
 const words = "words"
 
 func (i *Index) Init(id int) {
-	i.words = make(map[string]bool)
+	i.words = make(map[string]int)
 	i.files = make(map[int]string)
-	i.idx = new(trie.T)
-	i.idx.Init(26)
+	i.idx = make(map[int]map[string]bool)
 	i.id = id
 	i.path = fmt.Sprintf("idx-%d", id)
 
@@ -51,17 +49,24 @@ func (i *Index) loadWords() error {
 	}
 
 	r := bufio.NewReader(wf)
+	c := 0
 	for {
 		l, _, err := r.ReadLine()
 		if err == io.EOF {
 			break
 		}
-		if len(l) >= minLength {
-			i.words[string(l)] = true
+
+		if w := string(l); len(l) >= minLength {
+			i.words[w] = c
+			c++
 		}
 	}
 
 	return nil
+}
+
+func (i *Index) shouldIndex(c string) bool {
+	return int(c[0])%clients == i.id-1
 }
 
 func (i *Index) Index(path string) {
@@ -71,6 +76,7 @@ func (i *Index) Index(path string) {
 	}
 
 	log.Printf("%d: Done indexing %q\n", i.id, path)
+	log.Printf("%d: Words = %d, Files = %d, Index = %d", i.id, len(i.words), len(i.files), len(i.idx))
 }
 
 func (i *Index) indexDir(root, dir string) (err error) {
@@ -157,23 +163,20 @@ func (i *Index) indexFile(root, file string) (err error) {
 				for jj := j + minLength; jj < len(word); jj++ {
 					w := word[j : jj+1]
 
-					if _, valid := i.words[w]; !valid {
+					var wp int
+					wp, valid := i.words[w]
+					if !valid {
 						//log.Printf("%d: %q is not a valid word, skipping indexing\n", i.id, w)
 						continue
 					}
 
-					if int(w[0])%clients != i.id-1 {
+					if !i.shouldIndex(w) {
 						//log.Printf("%d: %q does not belong in this index: %d\n", i.id, w, int(w[0])%(clients+1))
 						continue
 					}
 
-					if keys, fw := i.idx.Get(w); fw {
-						keyMap := keys.(map[string]bool)
-						if _, fk := keyMap[key]; !fk {
-							keyMap[key] = true
-						}
-					} else {
-						i.idx.Insert(w, map[string]bool{key: true})
+					if _, found = i.idx[wp][key]; !found {
+						add(i.idx, wp, key)
 					}
 				}
 			}
@@ -183,7 +186,7 @@ func (i *Index) indexFile(root, file string) (err error) {
 	return
 }
 
-func add(m map[string]map[string]bool, word, key string) {
+func add(m map[int]map[string]bool, word int, key string) {
 	mm, ok := m[word]
 	if !ok {
 		mm = make(map[string]bool)
@@ -199,12 +202,13 @@ func (i *Index) Search(word string) []string {
 	}
 
 	var res []string
-	if keys, found := i.idx.Get(word); found {
-		e := keys.(map[string]bool)
-		for k, _ := range e {
-			loc := strings.Split(k, ":")
-			file, _ := strconv.Atoi(loc[0])
-			res = append(res, fmt.Sprintf("\"%v:%v\"", i.files[file], loc[1]))
+	if wp, ok := i.words[word]; ok {
+		if e := i.idx[wp]; e != nil {
+			for k, _ := range e {
+				loc := strings.Split(k, ":")
+				file, _ := strconv.Atoi(loc[0])
+				res = append(res, fmt.Sprintf("\"%v:%v\"", i.files[file], loc[1]))
+			}
 		}
 	}
 
