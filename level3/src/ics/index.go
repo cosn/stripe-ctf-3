@@ -13,9 +13,9 @@ import (
 )
 
 type Index struct {
-	words map[string]int
+	words map[string]bool
 	files map[int]string
-	idx   map[int]map[string]bool
+	idx   map[string]map[string]bool
 	id    int
 	path  string
 }
@@ -28,9 +28,9 @@ const minLength = 3
 const words = "words"
 
 func (i *Index) Init(id int) {
-	i.words = make(map[string]int)
+	i.words = make(map[string]bool)
 	i.files = make(map[int]string)
-	i.idx = make(map[int]map[string]bool)
+	i.idx = make(map[string]map[string]bool)
 	i.id = id
 	i.path = fmt.Sprintf("idx-%d", id)
 
@@ -49,16 +49,14 @@ func (i *Index) loadWords() error {
 	}
 
 	r := bufio.NewReader(wf)
-	c := 0
 	for {
 		l, _, err := r.ReadLine()
 		if err == io.EOF {
 			break
 		}
 
-		if w := string(l); len(l) >= minLength {
-			i.words[w] = c
-			c++
+		if w := string(l); len(w) >= minLength {
+			i.words[w] = true
 		}
 	}
 
@@ -159,26 +157,13 @@ func (i *Index) indexFile(root, file string) (err error) {
 				continue
 			}
 
-			for j := 0; j <= len(word); j++ {
-				for jj := j + minLength; jj < len(word); jj++ {
-					w := word[j : jj+1]
+			if !i.shouldIndex(word) {
+				//log.Printf("%d: %q does not belong in this index: %d\n", i.id, w, int(w[0])%(clients+1))
+				continue
+			}
 
-					var wp int
-					wp, valid := i.words[w]
-					if !valid {
-						//log.Printf("%d: %q is not a valid word, skipping indexing\n", i.id, w)
-						continue
-					}
-
-					if !i.shouldIndex(w) {
-						//log.Printf("%d: %q does not belong in this index: %d\n", i.id, w, int(w[0])%(clients+1))
-						continue
-					}
-
-					if _, found = i.idx[wp][key]; !found {
-						add(i.idx, wp, key)
-					}
-				}
+			if _, found = i.idx[word][key]; !found {
+				add(i.idx, word, key)
 			}
 		}
 	}
@@ -186,7 +171,7 @@ func (i *Index) indexFile(root, file string) (err error) {
 	return
 }
 
-func add(m map[int]map[string]bool, word int, key string) {
+func add(m map[string]map[string]bool, word, key string) {
 	mm, ok := m[word]
 	if !ok {
 		mm = make(map[string]bool)
@@ -195,22 +180,25 @@ func add(m map[int]map[string]bool, word int, key string) {
 	mm[key] = true
 }
 
-func (i *Index) Search(word string) []string {
+func (i *Index) Search(word string) string {
 	if len(word) < minLength {
 		log.Printf("%d: %q does not meet the minimum length requirement of %d\n", i.id, word, minLength)
-		return nil
+		return ""
 	}
 
 	var res []string
-	if wp, ok := i.words[word]; ok {
-		if e := i.idx[wp]; e != nil {
-			for k, _ := range e {
-				loc := strings.Split(k, ":")
-				file, _ := strconv.Atoi(loc[0])
-				res = append(res, fmt.Sprintf("\"%v:%v\"", i.files[file], loc[1]))
+	if _, valid := i.words[word]; valid {
+		for k, v := range i.idx {
+			if strings.Contains(k, word) {
+				for k, _ := range v {
+					loc := strings.Split(k, ":")
+					file, _ := strconv.Atoi(loc[0])
+
+					res = append(res, fmt.Sprintf("\"%v:%v\"", i.files[file], loc[1]))
+				}
 			}
 		}
 	}
 
-	return res
+	return strings.Join(res, ",")
 }

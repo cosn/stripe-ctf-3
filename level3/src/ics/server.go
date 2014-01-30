@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime/pprof"
 	"strings"
+	"sync"
 )
 
 type Server interface {
@@ -96,17 +97,20 @@ func (s *MasterServer) Index(rw http.ResponseWriter, req *http.Request) {
 
 func (s *MasterServer) Query(rw http.ResponseWriter, req *http.Request) {
 	q := req.FormValue("q")
-	if len(q) == 0 {
-		rw.Write(fail("query is missing"))
-		rw.WriteHeader(http.StatusBadRequest)
+	//log.Printf("Searching for %q\n", q)
+
+	wg := new(sync.WaitGroup)
+	var res [][]byte = make([][]byte, 3)
+	for i, c := range s.c {
+		wg.Add(1)
+		go func(ii int, cc *SearchClient) {
+			res[ii] = cc.Query(q, wg)
+		}(i, c)
 	}
+	wg.Wait()
 
-	rw.Write(s.client(int(q[0])).Query(q))
+	rw.Write(successQuery(res))
 	rw.WriteHeader(http.StatusOK)
-}
-
-func (s *MasterServer) client(c int) *SearchClient {
-	return s.c[c%clients]
 }
 
 func (s *SearchServer) Init(id, port int) {
@@ -160,9 +164,8 @@ func (s *SearchServer) Index(rw http.ResponseWriter, req *http.Request) {
 
 func (s *SearchServer) Query(rw http.ResponseWriter, req *http.Request) {
 	q := req.FormValue("q")
-	log.Printf("%d: searching for %q\n", s.id, q)
-	if res := s.index.Search(q); res != nil {
-		rw.Write(successQuery(res))
+	if res := s.index.Search(q); len(res) > 0 {
+		rw.Write([]byte(res))
 	}
 
 	rw.WriteHeader(http.StatusOK)
@@ -172,7 +175,19 @@ func success() []byte {
 	return []byte("{\"success\": true}")
 }
 
-func successQuery(res []string) []byte {
+func successQuery(results [][]byte) []byte {
+	var res []string
+	m := make(map[string]bool)
+	for _, r := range results {
+		matches := strings.Split(string(r), ",")
+		for _, entry := range matches {
+			if _, exists := m[entry]; len(entry) > 0 && !exists {
+				m[entry] = true
+				res = append(res, entry)
+			}
+		}
+	}
+
 	return []byte("{\"success\": true,\n\"results\": [" + strings.Join(res, ",\n") + "]}")
 }
 

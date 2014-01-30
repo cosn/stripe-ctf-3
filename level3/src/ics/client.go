@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 type SearchClient struct {
@@ -69,7 +70,8 @@ func (s *SearchClient) Index(path string) {
 	}
 }
 
-func (s *SearchClient) Query(q string) []byte {
+func (s *SearchClient) Query(q string, wg *sync.WaitGroup) []byte {
+	defer wg.Done()
 	r, err := s.c.Get(fmt.Sprintf("%v/?q=%v", s.url, q))
 	if err != nil {
 		log.Printf("client %d: query() error = %v\n", s.id, err)
